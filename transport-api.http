@@ -1,0 +1,41 @@
+### Swiss Transport API - Test Requests
+### Base URL: http://transport.opendata.ch/v1
+
+### 1. Find nearest station by coordinates (Home location)
+GET http://transport.opendata.ch/v1/locations?x=47.41729671900619&y=9.357221339051806
+
+###
+
+### 2. Get stationboard for a specific station (example: using station ID)
+# First run the locations request above, then use a station ID from the response
+# Example station IDs: 8506302 (St. Gallen), 8503000 (Zürich HB)
+GET http://transport.opendata.ch/v1/stationboard?id=8506302&limit=10
+
+###
+
+### 3. Get stationboard with more results
+GET http://transport.opendata.ch/v1/stationboard?id=8506302&limit=20
+
+###
+
+### 4. Search for stations by name
+GET http://transport.opendata.ch/v1/locations?query=St.Gallen,Vonwil
+
+###
+
+### 5. Get connections between two locations
+# From St. Gallen to Zürich HB
+GET http://transport.opendata.ch/v1/connections?from=St.Gallen&to=Zürich
+
+###
+
+### 6. Get connections with specific datetime
+GET http://transport.opendata.ch/v1/connections?from=St.Gallen&to=Zürich&date=2026-01-02&time=14:00
+
+###
+
+### 7. Find stations near coordinates (alternative format)
+GET http://transport.opendata.ch/v1/locations?x=47.4172&y=9.3572&type=station
+
+###
+

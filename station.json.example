@@ -1,0 +1,8 @@
+# Example station.json configuration file
+# Copy this to the root directory or to /boot/station.json on Raspberry Pi
+
+{
+  "lat": 47.41729671900619,
+  "lon": 9.357221339051806,
+  "name": "Home"
+}
