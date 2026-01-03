@@ -9,64 +9,87 @@ class SwissTransportClient(ITransportRepository):
 
     async def get_connections(self, location: Location, limit: int = 20) -> List[Connection]:
         async with httpx.AsyncClient() as client:
-            # 1. Find nearest station
-            # transport.opendata.ch uses x for Latitude and y for Longitude
-            # type=station filters to only return actual transit stations, not addresses
-            # API returns stations ordered by distance (closest first)
-            loc_params = {"x": location.latitude, "y": location.longitude, "type": "station"}
-            loc_resp = await client.get(f"{self.BASE_URL}/locations", params=loc_params)
-            loc_resp.raise_for_status()
-            loc_data = loc_resp.json()
-            
-            stations = loc_data.get("stations", [])
-            # Filter for stations with valid IDs (some results may be addresses without IDs)
-            valid_stations = [s for s in stations if s.get("id")]
-            
-            if not valid_stations:
-                print("Warning: No valid stations found near location")
+            station = await self._find_nearest_station(client, location)
+            if not station:
                 return []
             
-            # Take the first valid station (closest one with an ID)
-            station = valid_stations[0]
-            station_id = station["id"]
-            station_name = station.get("name", "Unknown")
-            print(f"Using station: {station_name} (ID: {station_id})")
+            stationboard_entries = await self._fetch_stationboard(client, station["id"], limit)
+            connections = self._parse_stationboard_entries(stationboard_entries)
             
-            # 2. Get Stationboard
-            board_params = {"id": station_id, "limit": limit}
-            board_resp = await client.get(f"{self.BASE_URL}/stationboard", params=board_params)
-            board_resp.raise_for_status()
-            board_data = board_resp.json()
-            
-            connections = []
-            for entry in board_data.get("stationboard", []):
-                try:
-                    # Parse time
-                    # entry['stop']['departure'] is ISO string e.g. "2023-10-27T14:00:00+0200"
-                    dep_time_str = entry['stop']['departure']
-                    if not dep_time_str:
-                        continue
-                        
-                    dep_time = datetime.fromisoformat(dep_time_str)
-                    
-                    # Construct line name
-                    category = entry.get('category', '')
-                    number = entry.get('number', '')
-                    line_name = f"{category} {number}".strip()
-                    
-                    # Get delay in minutes (API provides it in minutes)
-                    delay = entry['stop'].get('delay')
-                    
-                    conn = Connection(
-                        destination=entry['to'],
-                        departure_time=dep_time,
-                        line=line_name,
-                        platform=entry['stop'].get('platform'),
-                        delay=delay
-                    )
-                    connections.append(conn)
-                except (ValueError, KeyError) as e:
-                    # Skip malformed entries
-                    continue
-                
             return connections
+
+    async def _find_nearest_station(self, client: httpx.AsyncClient, location: Location) -> dict | None:
+        """Find the nearest valid station for the given location."""
+        loc_params = {
+            "x": location.latitude,
+            "y": location.longitude,
+            "type": "station"
+        }
+        
+        loc_resp = await client.get(f"{self.BASE_URL}/locations", params=loc_params)
+        loc_resp.raise_for_status()
+        loc_data = loc_resp.json()
+        
+        valid_stations = self._filter_valid_stations(loc_data.get("stations", []))
+        
+        if not valid_stations:
+            print("Warning: No valid stations found near location")
+            return None
+        
+        station = valid_stations[0]
+        station_name = station.get("name", "Unknown")
+        print(f"Using station: {station_name} (ID: {station['id']})")
+        
+        return station
+
+    @staticmethod
+    def _filter_valid_stations(stations: list) -> list:
+        """Filter stations to include only those with valid IDs."""
+        return [station for station in stations if station.get("id")]
+
+    async def _fetch_stationboard(self, client: httpx.AsyncClient, station_id: str, limit: int) -> list:
+        """Fetch stationboard data for the given station."""
+        board_params = {"id": station_id, "limit": limit}
+        board_resp = await client.get(f"{self.BASE_URL}/stationboard", params=board_params)
+        board_resp.raise_for_status()
+        board_data = board_resp.json()
+        
+        return board_data.get("stationboard", [])
+
+    def _parse_stationboard_entries(self, entries: list) -> List[Connection]:
+        """Parse stationboard entries into Connection objects."""
+        connections = []
+        
+        for entry in entries:
+            connection = self._parse_single_entry(entry)
+            if connection:
+                connections.append(connection)
+        
+        return connections
+
+    def _parse_single_entry(self, entry: dict) -> Connection | None:
+        """Parse a single stationboard entry into a Connection object."""
+        try:
+            dep_time_str = entry['stop']['departure']
+            if not dep_time_str:
+                return None
+            
+            dep_time = datetime.fromisoformat(dep_time_str)
+            line_name = self._build_line_name(entry)
+            
+            return Connection(
+                destination=entry['to'],
+                departure_time=dep_time,
+                line=line_name,
+                platform=entry['stop'].get('platform'),
+                delay=entry['stop'].get('delay')
+            )
+        except (ValueError, KeyError):
+            return None
+
+    @staticmethod
+    def _build_line_name(entry: dict) -> str:
+        """Build line name from category and number."""
+        category = entry.get('category', '')
+        number = entry.get('number', '')
+        return f"{category} {number}".strip()
